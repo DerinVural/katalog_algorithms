@@ -1,0 +1,7 @@
+# Star-ID bench — Faz 0 bağımlılıkları
+numpy>=1.26
+scipy>=1.11
+astropy>=6.0
+astroquery>=0.4.7
+matplotlib>=3.7
+pytest>=7.4

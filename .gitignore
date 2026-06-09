@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Bench artefaktları
+bench/results/*
+!bench/results/.gitkeep
+bench/data/*.npz
+bench/data/*.fits
+
+# OS
+.DS_Store
+Thumbs.db
