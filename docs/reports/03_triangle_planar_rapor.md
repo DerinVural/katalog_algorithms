@@ -43,6 +43,11 @@ altında, O(n·f²) DB maliyetini ölçüp O(n) Liebe ile kontrast oluşturmak.
   farkının doğrudan ampirik kanıtı. (A-merkezli co-visibility ile ~1.7M üçgen üretilip
   dedup'tan sonra ~1.02M; 2×-yarıçap köşegen co-visibility ~25M verirdi — inşası infeasible.)
 
+> **Dipnot (brief 03b):** 69× oranı **muhafazakârdır** — Liebe DB'si FOV-kenarı
+> dayanıklılığı için `neighbors_k=3` ile ~3× şişkin (14976 vs 4992 kayıt). Literal
+> `k=2` (yıldız başına tek kayıt, ~0.24 MB) ile oran **~200×**'e çıkar. Karakterizasyon
+> (O(n) vs O(n·f²)) her iki durumda da değişmez.
+
 ## 4. Zamanlama (full-sky, best-of-3, ısınmalı)
 
 | Aşama | medyan | mean | max |

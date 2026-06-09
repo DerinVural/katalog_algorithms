@@ -25,7 +25,9 @@ _ARCSEC_PER_RAD = 180.0 * 3600.0 / np.pi
 @dataclass
 class TrialResult:
     id_rate: float
-    false_id_flag: bool
+    false_id_flag: bool                 # = wrong_attitude (yalnız TEHLİKELİ durum)
+    no_solution: bool                   # attitude çözülemedi (GÜVENLİ)
+    wrong_attitude: bool                # çözüldü ama hata > gate (TEHLİKELİ)
     n_true: int
     n_correct: int
     n_wrong: int
@@ -76,11 +78,18 @@ def evaluate(
 
     id_rate = n_correct / n_true if n_true > 0 else 0.0
     total_err, cross_err, roll_err = attitude_error(q_est, truth.q_true)
-    false_id_flag = (not np.isfinite(total_err)) or (total_err > false_id_threshold_arcsec)
+
+    # Çözümsüzlük (GÜVENLİ) ile yanlış attitude (TEHLİKELİ) ayrı bayraklar.
+    solved = (q_est is not None) and bool(np.all(np.isfinite(q_est)))
+    no_solution = not solved
+    wrong_attitude = solved and (total_err > false_id_threshold_arcsec)
+    false_id_flag = wrong_attitude
 
     return TrialResult(
         id_rate=id_rate,
         false_id_flag=bool(false_id_flag),
+        no_solution=bool(no_solution),
+        wrong_attitude=bool(wrong_attitude),
         n_true=n_true,
         n_correct=n_correct,
         n_wrong=n_wrong,
