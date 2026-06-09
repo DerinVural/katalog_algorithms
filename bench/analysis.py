@@ -51,7 +51,9 @@ def find_rich_attitude(catalog: Catalog, min_stars: int = 8, seed: int = 0) -> n
 
 
 def _db_array_fields(db: Any) -> dict[str, np.ndarray]:
-    """DB nesnesinden eşit-uzunluklu numpy alanlarını topla (dataclass/__dict__)."""
+    """DB nesnesinden eşit-uzunluklu numpy alanlarını topla (dataclass/__dict__).
+
+    1-D alanlar olduğu gibi; 2-D (M,k) alanlar k sütuna açılır (ör. key -> key0..)."""
     if is_dataclass(db):
         items = {f.name: getattr(db, f.name) for f in fields(db)}
     elif hasattr(db, "__dict__"):
@@ -59,11 +61,20 @@ def _db_array_fields(db: Any) -> dict[str, np.ndarray]:
     else:
         items = {}
     arrays = {k: np.asarray(v) for k, v in items.items()
-              if isinstance(v, np.ndarray) and v.ndim == 1}
+              if isinstance(v, np.ndarray) and v.ndim in (1, 2)}
     if not arrays:
         return {}
-    n = max(len(v) for v in arrays.values())
-    return {k: v for k, v in arrays.items() if len(v) == n}
+    n = max(v.shape[0] for v in arrays.values())
+    out: dict[str, np.ndarray] = {}
+    for k, v in arrays.items():
+        if v.shape[0] != n:
+            continue
+        if v.ndim == 1:
+            out[k] = v
+        else:
+            for c in range(v.shape[1]):
+                out[f"{k}{c}"] = v[:, c]
+    return out
 
 
 # --------------------------------------------------------------------- 1) DB
@@ -246,8 +257,11 @@ def run_full_analysis(
     out_dir: Path = RESULTS_DIR,
     attitude: np.ndarray | None = None,
     db_transforms: dict[str, Callable] | None = None,
+    n_scenes: int = 150,
 ) -> dict[str, Any]:
-    """Tüm analiz setini koş, artefaktları yaz, rapora gömülecek özeti döndür."""
+    """Tüm analiz setini koş, artefaktları yaz, rapora gömülecek özeti döndür.
+
+    n_scenes: timing örnekleme sahnesi sayısı (pahalı algoritmalarda düşür)."""
     catalog = catalog if catalog is not None else load_catalog()
     name = name or getattr(algo, "name", "algo")
     attitude = attitude if attitude is not None else find_rich_attitude(catalog)
@@ -256,7 +270,7 @@ def run_full_analysis(
     db = algo.build_database(catalog)
     db_summary = dump_database(db, out_dir / f"{name}_db.csv", db_transforms)
 
-    timing = measure_timing(algo, catalog)
+    timing = measure_timing(algo, catalog, n_scenes=n_scenes)
     plot_timing(timing, out_dir / f"{name}_timing.png", name=name)
 
     grace = grace_curve(algo, catalog, attitude,

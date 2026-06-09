@@ -34,3 +34,19 @@ def find_rich_attitude(catalog, min_stars: int = 8, seed: int = 0):
 @pytest.fixture(scope="session")
 def rich_attitude(catalog):
     return find_rich_attitude(catalog, min_stars=8, seed=0)
+
+
+def find_attitude_in_range(catalog, lo: int, hi: int, seed: int = 0):
+    """Gözlem sayısı [lo, hi] aralığında bir attitude bul (tipik FOV yoğunluğu)."""
+    rng = np.random.default_rng(seed)
+    for _ in range(5000):
+        q = random_quat(rng)
+        if lo <= count_visible(catalog, q) <= hi:
+            return q
+    raise RuntimeError(f"[{lo},{hi}] yıldızlı attitude bulunamadı.")
+
+
+@pytest.fixture(scope="session")
+def moderate_attitude(catalog):
+    """Tipik yoğunluk (~10-16 yıldız) — O(f³) üçgen testleri için."""
+    return find_attitude_in_range(catalog, 10, 16, seed=0)
