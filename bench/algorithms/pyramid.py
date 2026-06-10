@@ -22,7 +22,7 @@ from typing import Sequence
 import numpy as np
 
 from ..core.interfaces import BodyVector, Catalog, CandidateMatch
-from ..core.quest import quest
+from ..core.quest import quest, rotate
 from ..core.sensor import SENSOR, SensorProfile
 from ..core.verify import ransac_confirm
 from .sla_kvector import SLAAlgorithm, SLAConfig, SLADB, kvector_range
@@ -50,11 +50,13 @@ def pyramid_triad_order(f: int) -> list[tuple[int, int, int]]:
 class PyramidConfig:
     tol_angle_arcsec: float = 15.0
     confirm_pyramid: bool = True       # native: 4. yıldız doğrulaması (ablation kapatır)
+    n_confirm_stars: int = 2           # gereken FARKLI doğrulayıcı yıldız (brief 06a; 1 = eski davranış)
+    core_residual_gate_arcsec: float = 20.0   # çekirdek QUEST artık-açı kapısı (~3×σ_beklenen)
+    min_extra_stars: int = 1           # çekirdek DIŞI açıklanması gereken min yıldız
+    #   (sahte attitude çekirdek dışını açıklayamaz; f_core==f ise şart düşer)
     use_core_verify: bool = False      # +ortak doğrulayıcı (ablation)
     match_gate_arcsec: float = 60.0
     verify_gate_arcsec: float = 60.0
-    min_solution_stars: int = 4        # onaylı piramidin tam-karede açıklaması gereken min yıldız
-    #   (sahte piramit reddi: yanlış attitude tam-kareyi açıklayamaz)
 
     @property
     def tol_rad(self) -> float:
@@ -81,6 +83,7 @@ class PyramidAlgorithm:
             sensor,
         )
         self.last_triads_tried = 0     # teşhis: kaç üçlü denendi
+        self.last_confirm_count = 0    # teşhis: kabul edilen çözümde doğrulayıcı yıldız sayısı
 
     # build_database — SLA ile AYNI (ek maliyet 0)
     def build_database(self, catalog: Catalog) -> SLADB:
@@ -131,22 +134,40 @@ class PyramidAlgorithm:
                 continue
             hI, hJ, hK = triple
             if self.cfg.confirm_pyramid:
-                hR_r = self._confirm_pyramid(i, j, k, hI, hJ, hK, f, part)
-                if hR_r is None:
-                    continue                           # 4. yıldız onaylamadı -> spike içeriyor
-                r, hR = hR_r
-                core = {i: hI, j: hJ, k: hK, r: hR}
+                # brief 06a: en az n_confirm_stars FARKLI doğrulayıcı yıldız
+                confs = self._confirm_pyramid(i, j, k, hI, hJ, hK, f, part)
+                required = min(self.cfg.n_confirm_stars, max(f - 3, 0))
+                if len(confs) < max(required, 1) and f > 3:
+                    continue                           # yeterli onay yok -> spike içeriyor
+                self.last_confirm_count = len(confs)
+                core = {i: hI, j: hJ, k: hK}
+                if confs:
+                    r, hR = confs[0]                   # klasik piramit = üçlü + 1. onay
+                    core[r] = hR
             else:
+                self.last_confirm_count = 0
                 core = {i: hI, j: hJ, k: hK}           # ablation: onaysız ilk tutarlı üçlü
 
-            # çekirdekten attitude + tam-kare yayılım (SLA ile paylaşılan)
+            # çekirdekten attitude (SLA ile paylaşılan yayılım öncesi)
             core_cm = [CandidateMatch(obs[p].obs_id, h) for p, h in core.items()]
             q = quest(core_cm, db.catalog, obs)
             if q is None:
                 continue
+
+            # brief 06a: çekirdek artık-açı kapısı — sahte dörtlüler açı-tutarlılığını
+            # geçse de QUEST artıkları tipik olarak büyüktür
+            body = np.array([obs[p].u_body for p in core])
+            inertial = np.array([db.catalog.by_id(h).u_inertial for h in core.values()])
+            resid = np.arccos(np.clip(np.sum(rotate(q, inertial) * body, axis=1), -1.0, 1.0))
+            if np.any(resid > self.cfg.core_residual_gate_arcsec * _ARCSEC):
+                continue
+
             full = self._sla._propagate(q, obs, db.catalog)
-            # sahte piramit reddi: doğru attitude tam-kareyi açıklar; sahtesi açıklamaz
-            if len(full) < self.cfg.min_solution_stars:
+            # brief 06a: çekirdek DIŞI en az min_extra_stars ek yıldız açıklanmalı
+            # (sahte attitude çekirdek dışını açıklayamaz; f_core==f ise şart düşer)
+            core_obs = {obs[p].obs_id for p in core}
+            extra = sum(1 for m in full if m.obs_id not in core_obs)
+            if f > len(core) and extra < self.cfg.min_extra_stars:
                 continue
             if self.cfg.use_core_verify:
                 full = ransac_confirm(full, obs, db.catalog,
@@ -182,12 +203,23 @@ class PyramidAlgorithm:
         return found
 
     def _confirm_pyramid(self, i, j, k, hI, hJ, hK, f, part):
-        """Kalan gözlemlerden bir r, (i,r),(j,r),(k,r) aynı tek hipR'de tutarlıysa
-        (r, hR) döndür; yoksa None."""
+        """(i,r),(j,r),(k,r) üç kesişimi TAM 1 hipR veren FARKLI r'lerin listesi.
+
+        En fazla n_confirm_stars onay toplanır (erken çıkış); kalan gözlem azsa
+        eldeki maksimum döner (çağıran kenar durumunu ele alır, brief 06a).
+        """
+        confs: list[tuple[int, int]] = []
+        used_hR: set[int] = {hI, hJ, hK}
         for r in range(f):
             if r in (i, j, k):
                 continue
             hRset = part(i, r, hI) & part(j, r, hJ) & part(k, r, hK)
             if len(hRset) == 1:
-                return r, next(iter(hRset))
-        return None
+                hR = next(iter(hRset))
+                if hR in used_hR:
+                    continue                       # aynı katalog yıldızı iki gözleme olamaz
+                confs.append((r, hR))
+                used_hR.add(hR)
+                if len(confs) >= self.cfg.n_confirm_stars:
+                    break
+        return confs
