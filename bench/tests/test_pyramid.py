@@ -81,22 +81,21 @@ def test_t2_torture_blocks(catalog):
                         "idr": float(np.mean(idr)), "singles": singles}
     write_csv(rows, RESULTS / "pyramid_torture.csv")
 
-    # SAHTE PİRAMİT = 0 (brief 06a'nın asıl hedefi): her iki blokta da kabul
-    # edilen TÜM çözümlerde kimlikler doğru (yanlış kimlik / spike eşlemesi yok).
+    # SAHTE PİRAMİT = 0 (06a'nın asıl hedefi): her iki blokta da kabul edilen
+    # TÜM çözümlerde kimlikler doğru (yanlış kimlik / spike eşlemesi yok).
     assert stats["5r_sig0"]["nw"] == 0
     assert stats["5r_sig5"]["nw"] == 0
-    assert stats["5r_sig0"]["wa"] == 0                         # ZORUNLU
 
-    # !! PM KARARI BEKLİYOR (06a raporu §σ=5 bulgusu) !!
-    # σ=5″'te wrong_attitude bayrakları SAHTE PİRAMİT DEĞİL: kimlikler %100 doğru,
-    # hata saf roll (5 yıldız + dar FOV'da bilgi-teorik gürültü, 60″ toplam-hata
-    # kapısını ~%12 olasılıkla aşar). Eski-eşdeğer konfig de aynı oranı veriyor —
-    # hiçbir kimliklendirme mantığı bunu 0 yapamaz. Literal wa==0 yerine:
-    # her wa vakasının saf-roll (kimlik-hatasız) olduğu + oran sınırı assert edilir.
+    # 06b çözümü: eksen-ayrık kapı (cross 60″ / roll 600″, Liebe §V) saf-roll
+    # artefaktını akladı — literal wrong_attitude=0 artık her iki blokta ZORUNLU.
+    # (06a'daki bayraklar cross 1-8″, roll 60-96″ < 600″ idi.)
+    assert stats["5r_sig0"]["wa"] == 0                         # ZORUNLU
+    assert stats["5r_sig5"]["wa"] == 0                         # ZORUNLU (06b ile erişilebilir)
+    # çift güvence (06a'dan kalır): wa vakası çıkarsa kimlik-hatasız olmalı + tripwire
     for r in rows:
         if r["block"] == "5r_sig5" and r["wrong_attitude"]:
-            assert r["n_wrong_id"] == 0                        # saf-roll, sahte değil
-    assert stats["5r_sig5"]["wa"] <= int(0.2 * N)              # tripwire
+            assert r["n_wrong_id"] == 0
+    assert stats["5r_sig5"]["wa"] <= int(0.2 * N)
 
     assert stats["3r_sig5"]["wa"] <= 1                         # nadir
     assert stats["3r_sig5"]["nosol"] >= N // 2                 # baskın güvenli çözümsüzlük

@@ -16,8 +16,13 @@ from scipy.spatial.transform import Rotation
 
 from .interfaces import CandidateMatch, SceneTruth
 
-# Bu eşiğin üzerindeki toplam attitude hatası "yanlış attitude" (false-ID) sayılır.
-FALSE_ID_THRESHOLD_ARCSEC = 60.0
+# Eksen-ayrık "yanlış attitude" kapıları (brief 06b; Liebe 2002 tutorial §V,
+# denk. 12/16): roll NEA, cross-boresight'tan tipik 6-16× kötüdür (Liebe'nin
+# örneği: 2.3″ cross vs 23″ roll → 10×). Eski tek toplam-hata kapısı, kimliği
+# kusursuz çözümlerin doğal roll gürültüsünü "tehlikeli" damgalıyordu (06a
+# karşı-bulgusu) — fizik, algoritma hatası sayılıyordu. Karar artık eksen-ayrık.
+FALSE_ID_CROSS_ARCSEC = 60.0     # cross-boresight kapısı (eski anlamın devamı)
+FALSE_ID_ROLL_ARCSEC = 600.0     # roll kapısı = 10× (Liebe §V örnek oranı)
 
 _ARCSEC_PER_RAD = 180.0 * 3600.0 / np.pi
 
@@ -58,8 +63,20 @@ def evaluate(
     q_est: np.ndarray | None,
     cands: list[CandidateMatch],
     truth: SceneTruth,
-    false_id_threshold_arcsec: float = FALSE_ID_THRESHOLD_ARCSEC,
+    false_id_cross_arcsec: float = FALSE_ID_CROSS_ARCSEC,
+    false_id_roll_arcsec: float = FALSE_ID_ROLL_ARCSEC,
 ) -> TrialResult:
+    """Deneme değerlendirmesi; `wrong_attitude` kararı EKSEN-AYRIK (brief 06b).
+
+    Liebe (2002) tutorial §V (denk. 12/16): bir yıldız izleyicinin roll NEA'sı
+    cross-boresight'tan tipik 6-16× kötüdür. Tek toplam-hata kapısı bu fiziği
+    algoritma hatası sayıyordu (06a karşı-bulgusu: kimliği kusursuz çözümler
+    saf roll gürültüsüyle bayraklanıyordu). Bu yüzden:
+
+        wrong_attitude = solved and (cross > gate_cross or roll > gate_roll)
+
+    `attitude_error_arcsec` (toplam) yalnız raporlama için durur.
+    """
     cand_map: dict[int, int] = {c.obs_id: c.hip_id for c in cands}
     true_matches = truth.true_matches
     n_true = len(true_matches)
@@ -82,7 +99,9 @@ def evaluate(
     # Çözümsüzlük (GÜVENLİ) ile yanlış attitude (TEHLİKELİ) ayrı bayraklar.
     solved = (q_est is not None) and bool(np.all(np.isfinite(q_est)))
     no_solution = not solved
-    wrong_attitude = solved and (total_err > false_id_threshold_arcsec)
+    wrong_attitude = solved and (
+        cross_err > false_id_cross_arcsec or roll_err > false_id_roll_arcsec
+    )
     false_id_flag = wrong_attitude
 
     return TrialResult(

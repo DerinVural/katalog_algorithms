@@ -33,6 +33,8 @@ def _eval_on_scene(algo, db, catalog, observed, truth) -> dict[str, Any]:
         "id_rate": res.id_rate, "false_id_flag": res.false_id_flag,
         "no_solution": res.no_solution, "wrong_attitude": res.wrong_attitude,
         "n_wrong": res.n_wrong, "attitude_error_arcsec": res.attitude_error_arcsec,
+        "cross_boresight_arcsec": res.cross_boresight_arcsec,
+        "roll_arcsec": res.roll_arcsec,
         "t_extract_s": t_ext, "t_match_s": t_mat,
     }
 
