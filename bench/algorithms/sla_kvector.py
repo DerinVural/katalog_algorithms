@@ -249,20 +249,31 @@ class SLAAlgorithm:
 
     def _propagate(self, q, observed, catalog) -> list[CandidateMatch]:
         """Attitude ile tüm gözlemleri katalogla eşle (full-frame direct match)."""
-        cat_body = rotate(q, catalog.vectors)
-        vis = cat_body[:, 2] >= np.cos(self.sensor.fov_radius_rad)
-        vidx = np.where(vis)[0]
-        if vidx.size == 0:
-            return []
-        tree = cKDTree(cat_body[vidx])
-        chord = 2.0 * np.sin(self.cfg.gate_rad / 2.0)
-        used: set[int] = set()
-        out = []
-        for o in observed:
-            d, j = tree.query(o.u_body)
-            if d <= chord:
-                hip = int(catalog.hip_ids[vidx[j]])
-                if hip not in used:
-                    used.add(hip)
-                    out.append(CandidateMatch(o.obs_id, hip))
-        return out
+        return propagate_full_frame(q, observed, catalog,
+                                    self.cfg.gate_rad, self.sensor)
+
+
+def propagate_full_frame(q, observed, catalog, gate_rad: float,
+                         sensor: SensorProfile = SENSOR) -> list[CandidateMatch]:
+    """Attitude-tabanlı tam-kare direct match (SLA/Pyramid/Samaan paylaşır).
+
+    Katalog gövde çerçevesine döndürülür; her gözlem, FOV içindeki en yakın
+    katalog yıldızına `gate_rad` içindeyse eşlenir (hip başına bir kez).
+    """
+    cat_body = rotate(q, catalog.vectors)
+    vis = cat_body[:, 2] >= np.cos(sensor.fov_radius_rad)
+    vidx = np.where(vis)[0]
+    if vidx.size == 0:
+        return []
+    tree = cKDTree(cat_body[vidx])
+    chord = 2.0 * np.sin(gate_rad / 2.0)
+    used: set[int] = set()
+    out = []
+    for o in observed:
+        d, j = tree.query(o.u_body)
+        if d <= chord:
+            hip = int(catalog.hip_ids[vidx[j]])
+            if hip not in used:
+                used.add(hip)
+                out.append(CandidateMatch(o.obs_id, hip))
+    return out

@@ -29,6 +29,9 @@ class NoiseConfig:
     n_spikes: int = 0                    # FOV içine rastgele sahte gözlem sayısı
     p_missing: float = 0.0               # her gerçek yıldızı düşürme olasılığı
     spike_mag_range: tuple[float, float] = (1.0, 6.0)
+    focal_error_ppm: float = 0.0         # kalibrasyon bozulması (brief 07 İş 0):
+    #   sahne GERÇEK odakla f·(1+ppm·1e-6) projekte eder, gözlemci NOMİNAL f ile
+    #   geri döndürür — gerçek dünyadaki odak-uzaklığı kayması modeli.
 
     @property
     def enabled(self) -> bool:
@@ -37,6 +40,7 @@ class NoiseConfig:
             or self.sigma_mag > 0
             or self.n_spikes > 0
             or self.p_missing > 0
+            or self.focal_error_ppm != 0.0
         )
 
 
@@ -73,10 +77,15 @@ def simulate_scene(
             continue  # eksik yıldız
         star = catalog.stars[idx]
         u = u_body_all[idx]
-        # centroid gürültüsü: piksel düzleminde Gaussian, sonra geri projeksiyon
+        # gerçek kamera: GERÇEK odak uzaklığıyla projeksiyon (x = f_true·u/uz,
+        # f'te lineer -> nominal pikselin radyal ölçeklenmesi)
         px = body_to_focal(u, sensor)
+        if noise_cfg.focal_error_ppm != 0.0:
+            px = px * (1.0 + noise_cfg.focal_error_ppm * 1e-6)
+        # centroid gürültüsü: piksel düzleminde Gaussian
         if sigma_px > 0:
             px = px + rng.normal(0.0, sigma_px, size=2)
+        # gözlemci: NOMİNAL f ile geri-dönüş (kalibrasyon hatası body'ye taşınır)
         u_noisy = focal_to_body(px[0], px[1], sensor)
         mag = star.mag + (rng.normal(0.0, noise_cfg.sigma_mag)
                           if noise_cfg.sigma_mag > 0 else 0.0)

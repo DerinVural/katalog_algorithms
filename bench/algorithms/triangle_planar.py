@@ -67,6 +67,27 @@ def _pairwise_angle(u: np.ndarray, v: np.ndarray) -> np.ndarray:
     return np.arccos(np.clip(np.sum(u * v, axis=-1), -1.0, 1.0))
 
 
+def covisible_triples(catalog: Catalog, sensor: SensorProfile = SENSOR) -> np.ndarray:
+    """FOV'da birlikte görülebilir (A-merkezli) üçlülerin TEKİL indeks dizisi (M,3).
+
+    Her üçlünün en az bir köşesi, diğer ikisini fov_radius içinde görür.
+    Satırlar artan köşe-indeksli ve tekildir. Triangle (brief 03) ile Samaan
+    (brief 07) bu enumerasyonu paylaşır — kopya kod yok.
+    """
+    V = catalog.vectors
+    chord = 2.0 * np.sin(sensor.fov_radius_rad / 2.0)
+    neigh = catalog.kdtree.query_ball_point(V, chord)
+    tris = []
+    for a in range(len(V)):
+        J = np.array([j for j in neigh[a] if j != a], dtype=int)
+        if J.size < 2:
+            continue
+        pi, pj = np.triu_indices(J.size, 1)
+        tris.append(np.column_stack([np.full(pi.size, a), J[pi], J[pj]]))
+    tri = np.sort(np.concatenate(tris), axis=1)
+    return np.unique(tri, axis=0)
+
+
 def _triple_key_and_vertices(s_xy, s_xz, s_yz, x, y, z):
     """3 kenar + 3 köşe -> sıralı anahtar + sıralı-kenar-çiftlerinin ortak köşeleri.
 
@@ -100,41 +121,19 @@ class TrianglePlanarAlgorithm:
     def build_database(self, catalog: Catalog) -> TriangleDB:
         V = catalog.vectors
         hips = catalog.hip_ids
-        # A-merkezli co-visibility: bir yıldızın FOV'una (yarıçap fov_radius) sığan üçlüler
-        chord = 2.0 * np.sin(self.sensor.fov_radius_rad / 2.0)
-        neigh = catalog.kdtree.query_ball_point(V, chord)
-
-        keys, vmm_l, vmx_l, vdx_l = [], [], [], []
-        for a in range(len(V)):
-            J = np.array([j for j in neigh[a] if j != a], dtype=int)
-            if J.size < 2:
-                continue
-            NV = V[J]
-            hA = int(hips[a]); hJ = hips[J]
-            aA = np.arccos(np.clip(NV @ V[a], -1.0, 1.0))     # A-komşu kenarları
-            pi, pj = np.triu_indices(J.size, 1)
-            s_ABi = aA[pi]                                    # {A, Bi}
-            s_ABj = aA[pj]                                    # {A, Bj}
-            s_BiBj = _pairwise_angle(NV[pi], NV[pj])          # {Bi, Bj}
-            key, v_mm, v_mx, v_dx = _triple_key_and_vertices(
-                s_ABi, s_ABj, s_BiBj, hA, hJ[pi], hJ[pj]
-            )
-            keys.append(key); vmm_l.append(v_mm); vmx_l.append(v_mx); vdx_l.append(v_dx)
-
-        key = np.concatenate(keys)                            # (M,3)
-        v_mm = np.concatenate(vmm_l); v_mx = np.concatenate(vmx_l); v_dx = np.concatenate(vdx_l)
-
-        # dedup: üçgen = {3 köşe}. Sıralı köşe üçlüsüne göre tekille.
-        tri = np.sort(np.stack([v_mm, v_mx, v_dx], axis=1), axis=1)
-        _, uniq = np.unique(tri, axis=0, return_index=True)
-        key, v_mm, v_mx, v_dx = key[uniq], v_mm[uniq], v_mx[uniq], v_dx[uniq]
+        tri = covisible_triples(catalog, self.sensor)         # (M,3) tekil
+        A, B, C = V[tri[:, 0]], V[tri[:, 1]], V[tri[:, 2]]
+        key, v_mm, v_mx, v_dx = _triple_key_and_vertices(
+            _pairwise_angle(A, B), _pairwise_angle(A, C), _pairwise_angle(B, C),
+            hips[tri[:, 0]], hips[tri[:, 1]], hips[tri[:, 2]],
+        )
 
         order = np.argsort(key[:, 0])                         # a_min'e göre sırala
         hip_to_vec = {int(h): V[i] for i, h in enumerate(hips)}
         return TriangleDB(
             key=np.ascontiguousarray(key[order]),
             v_mm=v_mm[order], v_mx=v_mx[order], v_dx=v_dx[order],
-            hip_to_vec=hip_to_vec, n_records=len(uniq),
+            hip_to_vec=hip_to_vec, n_records=len(tri),
         )
 
     # -------------------------------------------------------------- feature
