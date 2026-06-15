@@ -32,6 +32,10 @@ class NoiseConfig:
     focal_error_ppm: float = 0.0         # kalibrasyon bozulması (brief 07 İş 0):
     #   sahne GERÇEK odakla f·(1+ppm·1e-6) projekte eder, gözlemci NOMİNAL f ile
     #   geri döndürür — gerçek dünyadaki odak-uzaklığı kayması modeli.
+    oa_offset_error_frac: float = 0.0    # asal nokta (OA) ofseti (brief 07b final,
+    #   NDSIA makalesi denk. 3 / Tablo 1 birimi): YARI-imager genişliği ORANI.
+    #   δ_px = frac · (NPIX/2); gerçek asal nokta nominalden (δ,δ) px kaymıştır,
+    #   gözlemci nominali varsayar. δx=δy (yön rastgeleliği gerekmez).
 
     @property
     def enabled(self) -> bool:
@@ -41,6 +45,7 @@ class NoiseConfig:
             or self.n_spikes > 0
             or self.p_missing > 0
             or self.focal_error_ppm != 0.0
+            or self.oa_offset_error_frac != 0.0
         )
 
 
@@ -82,6 +87,10 @@ def simulate_scene(
         px = body_to_focal(u, sensor)
         if noise_cfg.focal_error_ppm != 0.0:
             px = px * (1.0 + noise_cfg.focal_error_ppm * 1e-6)
+        if noise_cfg.oa_offset_error_frac != 0.0:
+            # gerçek asal nokta nominalden kaymış: ölçülen piksel = gerçek + (δ,δ),
+            # δ = frac · yarı-imager genişliği (makale Tablo 1 birimi)
+            px = px + noise_cfg.oa_offset_error_frac * (sensor.npix / 2.0)
         # centroid gürültüsü: piksel düzleminde Gaussian
         if sigma_px > 0:
             px = px + rng.normal(0.0, sigma_px, size=2)
